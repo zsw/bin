@@ -1,0 +1,28 @@
+#!/bin/bash
+
+script=${0##*/}
+
+usage() { cat << EOF
+usage: $script
+    Binary package update on a arch system.
+EOF
+}
+
+(( $# > 1 )) && { usage; exit 1; }
+
+
+pacman -Syu
+aurget -Syu --devel --asroot
+echo "==> Resetting python symlinks..."
+rm /usr/bin/python
+rm /usr/bin/pydoc
+rm /usr/bin/python-config
+cp -s /usr/bin/python2 /usr/bin/python
+cp -s /usr/bin/pydoc2 /usr/bin/pydoc
+cp -s /usr/bin/python2-config /usr/bin/python-config
+echo "==> Removing Orphan Packages..."
+pacman --noconfirm -Rsn "$(pacman -Qqtd)" &>/dev/null || echo "==> No Orphan Packages to Remove..."
+pacman-optimize
+sync
+echo "==> Sync Complete"
+find /boot /etc -name '*.pac*' 2>/dev/null

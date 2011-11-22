@@ -1,0 +1,267 @@
+#!/bin/bash
+
+SYNCBACKUP_VERSION=4.0
+
+ADMIN=sblatchford@gmail.com
+BACKUP_DIR=/mnt/raid/archive/syncbackup/backups
+ARCHIVE_DIR=/mnt/raid/archive/syncbackup
+HOST_FILE=/etc/systems
+LOG_DIR=/var/log/syncbackup
+LOG_FILE=$LOG_DIR/syncbackup.log
+MIN_PERHOST=28
+SSH_ID_FILE=/root/.ssh/id_rsa-syncbackup
+SYNCDATE=$(date +%F)
+TRANSERRORS=0
+TRET=0
+
+script=${0##*/}
+usage() { cat << EOF
+usage: $script HOSTNAME1 [HOSTNAME2 .. HOSTNAMEn]
+
+This script creates incrimental archives and weekly backups for all
+systems specified in $HOST_FILE
+EOF
+}
+
+(( $# == 0 ))         && { usage; exit 1; }
+[[ ! -f $HOST_FILE ]] && { echo "ERROR: File $HOST_FILE not found ..."; exit 1; }
+[[ ! $LOG_DIR ]]      && { echo "Error: ARCHIVE_DIR not defined." >&2; exit 1; }
+
+cd "$LOG_DIR" && OUTPUT_FILE=$(mktemp "backup-$SYNCDATE-XXXXXX.txt")
+chmod 755 "$OUTPUT_FILE"
+exec > "$OUTPUT_FILE" 2>&1
+
+echo "-------------------------------------------------------------------------"
+echo "$script $SYNCBACKUP_VERSION"
+echo "Started on $(date)"
+echo ""
+echo "    This script creates incrimental archives and weekly backups for all"
+echo "    systems specified in $HOST_FILE"
+echo ""
+echo "Backups will be purged after $MIN_PERHOST days"
+echo "-------------------------------------------------------------------------"
+
+
+## Purge daily incremental archives
+for HOST in "$@"; do
+    while [[ $(find "$ARCHIVE_DIR" -mindepth 1 -maxdepth 1 -type d -name "$HOST"-* | wc -l) -gt "$MIN_PERHOST" ]]; do
+        echo "===: Purging archives older than $MIN_PERHOST days ..."
+        OBSOLETE_ARCHIVE=$(/bin/ls -rdt1 "$ARCHIVE_DIR/$HOST"-* | head -n 1)    ## Find the oldest directory
+        echo "===: Purging $OBSOLETE_ARCHIVE"
+        if [[ ! $(rm -r "$OBSOLETE_ARCHIVE") ]]; then
+            echo "===> Success"
+        else
+            echo "***** FAILED! *****"
+            ERRORS=1
+        fi
+        echo ""
+    done
+done
+
+
+## Purge weekly full backups
+for HOST in "$@"; do
+    while [[ $(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type f -name "$HOST"-* | wc -l) -gt "$MIN_PERHOST" ]]; do
+        echo "Purging backups older than $MIN_PERHOST days ..."
+        OBSOLETE_BACKUP=$(/bin/ls -rdt1 "$BACKUP_DIR/$HOST"-* | head -n 1)    ## Find the oldest file
+        echo "Purging $OBSOLETE_BACKUP"
+        if [[ ! $(rm -r "$OBSOLETE_BACKUP") ]]; then
+            echo "===> Success"
+        else
+            echo "***** FAILED! *****"
+            ERRORS=1
+        fi
+        echo ""
+    done
+done
+
+
+## Daily incremental backups
+for HOST in "$@" ; do
+    echo ""
+    echo "VVVVV Beginning archive of $HOST at $(date) VVVVV"
+    echo ""
+    echo "===: Preparing archive directories ..."
+
+    ## FIND THE PREVIOUS ARCHIVE directory name and generate today's archive directory name
+    if [[ $(find "$ARCHIVE_DIR" -mindepth 1 -maxdepth 1 -type d -name "$HOST"-*) ]]; then
+        OLD_ARCHIVE=$(ls -dc1 "$ARCHIVE_DIR/$HOST"-* | head -n 1)
+    else
+        OLD_ARCHIVE=""
+    fi
+
+    NEW_ARCHIVE="$ARCHIVE_DIR/${HOST}-$SYNCDATE/"
+
+#    if [[ -d $NEW_ARCHIVE ]]; then
+#        echo "***** The backup directory for today for $HOST already exists, skipping backup for this host! *****"
+#        echo ""
+#        continue
+#    else
+        if [[ $OLD_ARCHIVE == "" ]]; then
+            echo "***** Warning: No previous backup exists for $HOST.  (Is this the first time?) *****"
+            mkdir "$NEW_ARCHIVE"
+        else
+            echo "===: Making a hard-link copy for $HOST from the latest archive ..."
+            if [[ ! $(cp -al "$OLD_ARCHIVE" "$NEW_ARCHIVE") ]]; then
+                echo "===: Creating $NEW_ARCHIVE ..."
+                echo "===> Success"
+            else
+                echo "***** FAILED! *****"
+                continue
+            fi
+            echo ""
+        fi
+#    fi
+
+    echo "===: Rsync'ing data for $HOST"
+    echo "===: ${HOST}:/ $ARCHIVE_DIR/${HOST}-$SYNCDATE/"
+    echo ""
+
+    rsync -ahvH --bwlimit=1000 --delete --numeric-ids -e "ssh -i $SSH_ID_FILE" \
+        --include=/dev/console                              \
+        --include=/dev/initctl                              \
+        --include=/dev/null                                 \
+        --include=/dev/zero                                 \
+        --include=/var/abs/local                            \
+        --exclude=/dev/*                                    \
+        --exclude=/media                                    \
+        --exclude=/mnt                                      \
+        --exclude=/my                                       \
+        --exclude=/proc/*                                   \
+        --exclude=.cpan                                     \
+        --exclude=.macromedia                               \
+        --exclude=.adobe/Flash_Player/AssetCache/*          \
+        --exclude=.cache/*                                  \
+        --exclude=.config/.openoffice.org/*/user/registry/cache/* \
+        --exclude=.mozilla/firefox/*/Cache/*                \
+        --exclude=/home/*/dl                                \
+        --exclude=/home/*/media                             \
+        --exclude=/home/*/mnt                               \
+        --exclude=/home/*/tmp                               \
+        --exclude=/root/dl                                  \
+        --exclude=/root/media                               \
+        --exclude=/root/mnt                                 \
+        --exclude=/root/tmp                                 \
+        --exclude=/srv/http/magento/var/cache/*             \
+        --exclude=/srv/http/magento/var/session/*           \
+        --exclude=/swapfile                                 \
+        --exclude=/sys/*                                    \
+        --exclude=/tmp/*                                    \
+        --exclude=/var/abs/*                                \
+        --exclude=/var/cache/*                              \
+        --include=*                                         \
+        "${HOST}:/" "$ARCHIVE_DIR/${HOST}-$SYNCDATE/"
+
+    TRET=$?
+    if (( $TRET == 0 )); then
+        echo ""
+        echo "===> Success"
+    elif (( $TRET == 24 )); then
+        echo ""
+        echo "Transient errors; source image is changing.  Likely this is no cause of panic."
+        TRANSERRORS=$((TRANSERRORS+1))
+    else
+        echo ""
+        echo "***** FAILED! *****"
+        ERRORS=1
+    fi
+
+
+    if [[ $HOST == $HOSTNAME ]]; then
+        echo ""
+        echo "===: Rsync'ing data for $HOST"
+        echo "===: /mnt/raid/archive "$ARCHIVE_DIR/${HOST}-$SYNCDATE/mnt/raid/""
+        echo ""
+
+        mkdir -p "$ARCHIVE_DIR/${HOST}-$SYNCDATE/mnt/raid/"
+        rsync -avhH --bwlimit=1000 --delete --numeric-ids    \
+            --exclude=archlinux/                            \
+            --exclude=syncbackup/                           \
+            /mnt/raid/archive "$ARCHIVE_DIR/${HOST}-$SYNCDATE/mnt/raid/"
+
+        TRET=$?
+        if (( $TRET == 0 )); then
+            echo ""
+            echo "===> Success"
+        elif (( $TRET == 24 )); then
+            echo ""
+            echo "Transient errors; source image is changing.  Likely this is no cause of panic."
+            TRANSERRORS=$((TRANSERRORS+1))
+        else
+            echo ""
+            echo "***** FAILED! *****"
+            ERRORS=1
+        fi
+    fi
+
+    touch "$NEW_ARCHIVE"    ## rsync changes the date of the root synced directory; this is not what we want
+
+    echo ""
+    echo "^^^^^ Finished archive of host $HOST at $(date) ^^^^^"
+    echo ""
+
+done
+
+## Weekly complete backups
+#while read -r HOST; do
+for HOST in "$@"; do
+    if [[ $(date +%w) == 0 ]]; then
+        echo "Today is Sunday.  Creating weekly backups ..."
+        echo "Compressing $ARCHIVE_DIR/${HOST}-$SYNCDATE"
+        tar -czf "$BACKUP_DIR/${HOST}-$SYNCDATE".tgz "$ARCHIVE_DIR/${HOST}-${SYNCDATE}" &>/dev/null
+        if [[ $? == 0 ]]; then
+            echo "===> Success"
+        else
+            echo "***** FAILED! *****"
+            ERRORS=1
+        fi
+        echo ""
+    fi
+
+    if [[ $(date +%w) == 0 ]]; then
+        pre_a=0
+
+        while read -r a b ; do
+            if [[ $pre_a -gt $a ]]; then
+                (( i=100 - (100*"$a"/"$pre_a") ))
+                if (( $i > 10 )); then
+                    echo "Backup for $HOST has increased ${i}% since last backup"
+                    to="To: $ADMIN"
+                    subject="Subject: Backup for $HOST has increased ${i}% since last backup"
+                    body=$(/bin/ls -dt1 "$BACKUP_DIR/${HOST}"-*.tgz | head -2)\n \
+                    \n $(du -ch --exclude=mnt --max-depth=1 "$ARCHIVE_DIR/${HOST}-$SYNCDATE")\n \
+                    \n $(du -ch --exclude=mnt --max-depth=1 "$ARCHIVE_DIR/${HOST}-$(date +%F --date='-7 days')")
+
+                    echo -e "$to\n$subject\n\n$body" | sendmail -v -- "$ADMIN"
+                fi
+            fi
+
+        pre_a="$a"
+
+        done < <(/bin/du -s $(/bin/ls -dt1 "$BACKUP_DIR/${HOST}"-*.tgz | head -2))
+    fi
+
+done
+#done < <(awk '$4 ~ /x/ {print $1}' "$HOST_FILE")
+
+
+echo "Archive completed, $(date)"
+echo "Syncbackup v$SYNCBACKUP_VERSION running on $(hostname)" > "$LOG_FILE"
+echo "Backup Completed - Transcript @ http://donkey/syncbackup/$OUTPUT_FILE" >> "$LOG_FILE"
+echo >> "$LOG_FILE"
+
+if [[ $ERRORS ]]; then
+   echo "Some errors were reported!" >> "$LOG_FILE"
+elif (( $TRANSERRORS > 0 )); then
+   echo "Some ($TRANSERRORS) transient errors occured during copying." >> "$LOG_FILE"
+else
+   echo "No errors were reported" >> "$LOG_FILE"
+fi
+echo >> "$LOG_FILE"
+echo >> "$LOG_FILE"
+awk '/^sent / || /^total/ || /^\^\^/ {print; if(/^\^\^/){print ""}}' "$OUTPUT_FILE" >> "$LOG_FILE"
+
+echo -e "To: $ADMIN\nSubject: Daily Backup Report\n\n$(cat $LOG_FILE)" | sendmail -v -- "$ADMIN"
+
+
+# vim: ft=sh
