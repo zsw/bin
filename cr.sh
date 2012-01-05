@@ -7,4 +7,4 @@ cp "$1" /tmp/cr
 [[ *.cbz ]] && unzip "/tmp/cr/*.cbz" -d /tmp/cr &>/dev/null
 [[ *.cbr ]] && unrar e "/tmp/cr/*.cbr" /tmp/cr &>/dev/null
 ## if res == 1493, then -z 90
-sxiv -r -z 25 -Z /tmp/cr &>/dev/null &
+sxiv -r -z 10 -Z /tmp/cr &>/dev/null &
