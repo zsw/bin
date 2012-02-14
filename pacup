@@ -11,8 +11,22 @@ EOF
 (( $# > 1 )) && { usage; exit 1; }
 
 
+echo '==> Downloading pathogen'
+cd $HOME/.vim/autoload/; curl -sO https://raw.github.com/tpope/vim-pathogen/HEAD/autoload/pathogen.vim
+
+echo '==> Downloading vim bundles'
+for i in $HOME/.vim/bundle/*/; do
+    [[ ! -d $i/.git ]] && { echo "$i is missing .git/"; continue; }
+    cd "$i"
+    echo -e "$i\n"
+    git pull
+done
+cd -
+
+echo '==> Start pacman update'
 pacman -Syu
 aurget -Syu --devel --asroot
+
 echo "==> Resetting python symlinks..."
 rm /usr/bin/python
 rm /usr/bin/pydoc
@@ -20,9 +34,11 @@ rm /usr/bin/python-config
 cp -s /usr/bin/python2 /usr/bin/python
 cp -s /usr/bin/pydoc2 /usr/bin/pydoc
 cp -s /usr/bin/python2-config /usr/bin/python-config
+
 echo "==> Removing Orphan Packages..."
 pacman --noconfirm -Rsn "$(pacman -Qqtd)" &>/dev/null || echo "==> No Orphan Packages to Remove..."
 pacman-optimize
 sync
+
 echo "==> Sync Complete"
 find /boot /etc -name '*.pac*' 2>/dev/null
