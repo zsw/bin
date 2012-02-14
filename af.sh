@@ -49,14 +49,16 @@ printf "%s\n" "${af_array[@]}"  > "$af"
 
 ## OPTIONAL
 ## Add mail headers so file is viewable in mutt.
-mailfilenew=$HOME/.mail/ml-rss/arch/new/1271109605.5731_0.donkey
-mailfilecur=${mailfilenew/new/cur}:2,S
-header=$(echo -e "Date: $(date -R)\nSubject: ArchLinux Forums\nTo: User\nFrom: User\n\n---")
+#mailfilenew=$HOME/.mail/ml-rss/arch/new/1271109605.5731_0.donkey
+#mailfilecur=${mailfilenew/new/cur}:2,S
+#header=$(echo -e "Date: $(date -R)\nSubject: ArchLinux Forums\nTo: User\nFrom: User\n\n---")
 
-printf "%s\n" "$header" "${af_array[@]}" > "$mailfilecur"
+#printf "%s\n" "$header" "${af_array[@]}" > "$mailfilecur"
 
 ## If there are new forum posts, set mail file as unread
-grep -q bbs <<< "${af_array[@]}" && mv "$mailfilecur" "$mailfilenew"
+## SB 2012-02-13 18:34  The forums have gotten too busy for me to keep.
+## For now I'm going to not mark the email file as new.
+#grep -q bbs <<< "${af_array[@]}" && mv "$mailfilecur" "$mailfilenew"
 
 ## The key binding in mutt
 #macro generic,index,pager   E "<shell-escape>vim '-c sort /\^https/' + $HOME/doc/af<enter>" "unread archlinux forum post titles"
