@@ -1,30 +1,20 @@
 #!/bin/bash
 
 script=${0##*/}
-host_file=/etc/systems
-log_file=/var/log/unison.log
-
-usage() { cat << EOF
+_u() { cat << EOF
 usage: $script HOST1 [ HOST2 .. HOSTn ]
 This script syncs files via unison to hosts specified in $host_file
 EOF
 }
 
-(( $# == 0 )) || { usage; exit 1; }
+(( $# == 0 )) && { _u; exit 1; }
 
-[[ -f $host_file ]] || { echo "ERROR: File $host_file not found ..."; exit 1; }
+for host in "$@"; do
+    output=$(unison -silent "$host" 2>&1)
+    [[ $output ]] && { echo -e "$host\n$output"; } | logger -t unison -p user.warn
+done
 
-while read -r host; do
-    echo "$(date) $host" >> "$log_file"
-    if unison -silent "$host" &>> "$log_file"; then
-        continue
-    elif (( $? == 3 )); then
-        continue
-    else
-        echo -e "Error $host... check $log_file for details\n"
-    fi
-done < <(awk '$3 ~ /x/ { print $1 }' "$host_file" | sort)
-
-echo "$(date) dtsteve-dm_test" >> "$log_file"
-unison -silent dtsteve-dm_test &>> "$log_file" || echo -e "Error dtsteve-dm_test... check $log_file for details\n"
+output=
+output=$(unison -silent dtsteve-dm_test 2>&1)
+[[ $output ]] && { echo -e "$host\n$output"; } | logger -t unison -p user.warn
 ssh dtsteve -i /root/.ssh/id_rsa-syncbackup 'chown -R dm_test:dm_test /home/dm_test/'
