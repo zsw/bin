@@ -1,0 +1,11 @@
+#!/bin/bash
+
+urxvt -fg '#121212' -bg '#585858' -title sp -geometry 50x4+740+580 -e bash -c '{
+    d=$HOME/.mutt/tmp
+    f=$(/bin/ls -rt1 "$d" | tail -1)
+
+    while read -p "Print $f? y/n "; do
+        [[ $REPLY =~ [nNyY] ]] || continue
+        [[ $REPLY =~ [nN] ]] && exit 1 || lpr "$d/$f"
+        break
+    done; }'
